@@ -56,9 +56,10 @@ function proxyImage(url) {
 
 async function fetchUserId(username) {
   const data = await igFetch(
-    `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`
+    `https://i.instagram.com/api/v1/users/${encodeURIComponent(username)}/usernameinfo/`
   );
-  if (data?.data?.user?.id) return data.data.user.id;
+  const id = data?.user?.id || data?.user?.pk;
+  if (id) return id;
   throw new Error("Invalid username or API error");
 }
 
@@ -120,31 +121,27 @@ app.get("/info", async (req, res) => {
   if (!username) return res.status(400).json({ error: "Username parameter is required" });
   try {
     const data = await igFetch(
-      `https://i.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`
+      `https://i.instagram.com/api/v1/users/${encodeURIComponent(username)}/usernameinfo/`
     );
-    const user = data?.data?.user;
+    const user = data?.user;
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const bioLinks = (user.bio_links ?? []).map((l) => l.url);
+    const bioLinks = (user.bio_links ?? []).map((l) => l.url).filter(Boolean);
     res.json({
-      id: user.id,
+      id: user.id || user.pk,
       username: user.username,
       full_name: user.full_name,
       bio: user.biography || null,
-      pronouns: user.pronouns?.join(", ") || null,
-      category: user.category_name || null,
+      category: user.category || null,
       website: user.external_url || null,
       bio_links: bioLinks,
-      followers: user.edge_followed_by?.count ?? 0,
-      following: user.edge_follow?.count ?? 0,
-      posts: user.edge_owner_to_timeline_media?.count ?? 0,
-      highlights: user.highlight_reel_count ?? 0,
-      profile_picture: user.profile_pic_url_hd,
+      followers: user.follower_count ?? 0,
+      following: user.following_count ?? 0,
+      posts: user.media_count ?? 0,
+      profile_picture: user.profile_pic_url,
       is_private: user.is_private,
       is_verified: user.is_verified,
-      is_professional: user.is_professional_account,
-      is_business: user.is_business_account,
-      has_reels: user.has_clips,
+      is_business: user.is_business,
       profile_url: `https://www.instagram.com/${user.username}/`,
     });
   } catch (e) {
