@@ -8,7 +8,12 @@ app.use(express.json());
 app.set("json spaces", 2);
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const SESSION_COOKIE = process.env.SESSION_COOKIE || "sessionid=76670837707%3A531WL8IMR66MaY%3A0%3AAYgyI6DLZ3MjD4QwE1krewS5-IudlgT8vpYdYgoEQA";
+const SESSION_COOKIES = [
+  process.env.SESSION_COOKIE  || "sessionid=43518657979%3AJaBxvaarCPqYBN%3A17%3AAYi2rJrcLIEkisqS5y_OpIKf-T0-YcRGt_mfeXcJ7A",
+  process.env.SESSION_COOKIE2 || "sessionid=76670837707%3A531WL8IMR66MaY%3A0%3AAYgyI6DLZ3MjD4QwE1krewS5-IudlgT8vpYdYgoEQA",
+];
+let _cookieIdx = 0;
+const SESSION_COOKIE = () => { const c = SESSION_COOKIES[_cookieIdx % SESSION_COOKIES.length]; _cookieIdx++; return c; };
 const PROXY_URL      = process.env.PROXY_URL      || "http://5953:Xnv8AKXFBUUz@p105.instantproxies.com:9385";
 const IG_USER_AGENT =
   "Instagram 155.0.0.37.107 (iPhone11,8; iOS 14_4; en_US; en-US; scale=2.00; 828x1792; 190542906)";
@@ -22,7 +27,7 @@ function igFetch(url) {
       "-H", `User-Agent: ${IG_USER_AGENT}`,
       "-H", "Accept-Language: en-US",
       "-H", "X-IG-App-ID: 936619743392459",
-      "-H", `Cookie: ${SESSION_COOKIE}`,
+      "-H", `Cookie: ${SESSION_COOKIE()}`,
       url
     );
     execFile("curl", args, { maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
