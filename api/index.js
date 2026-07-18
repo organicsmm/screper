@@ -13,37 +13,23 @@ const SESSION_COOKIES = [
   process.env.SESSION_COOKIE2 || "sessionid=76670837707%3A531WL8IMR66MaY%3A0%3AAYgyI6DLZ3MjD4QwE1krewS5-IudlgT8vpYdYgoEQA",
 ];
 
-// Round-robin counter — rotates per request to spread load across accounts
 let cookieIndex = 0;
-function getNextCookie() {
-  const cookie = SESSION_COOKIES[cookieIndex % SESSION_COOKIES.length];
-  cookieIndex++;
-  return cookie;
-}
-
-// Two proxies — primary p104, fallback p105
-const PROXIES = [
-  process.env.PROXY_URL  || "http://4776:YuBaZsVLtUQ2@p104.instantproxies.com:8910",
-  process.env.PROXY_URL2 || "http://4776:YuBaZsVLtUQ2@p105.instantproxies.com:8909",
-];
 
 const IG_USER_AGENT =
   "Instagram 155.0.0.37.107 (iPhone11,8; iOS 14_4; en_US; en-US; scale=2.00; 828x1792; 190542906)";
 
-// ── Core fetch (tries all cookie+proxy combos) ────────────────────────────────
-function igFetchWith(url, cookieIndex, proxyIndex) {
+// ── Core fetch (no proxy — direct from Vercel) ────────────────────────────────
+function igFetchWith(url, cIdx) {
   return new Promise((resolve, reject) => {
-    const proxy = PROXIES[proxyIndex];
-    const cookie = SESSION_COOKIES[cookieIndex];
-    const args = ["-s", "--max-time", "20"];
-    if (proxy) args.push("-x", proxy);
-    args.push(
+    const cookie = SESSION_COOKIES[cIdx];
+    const args = [
+      "-s", "--max-time", "25",
       "-H", `User-Agent: ${IG_USER_AGENT}`,
       "-H", "Accept-Language: en-US",
       "-H", "X-IG-App-ID: 936619743392459",
       "-H", `Cookie: ${cookie}`,
       url
-    );
+    ];
     execFile("curl", args, { maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) return reject(new Error(`curl failed: ${stderr || err.message}`));
       const body = stdout.trim();
@@ -57,25 +43,18 @@ function igFetchWith(url, cookieIndex, proxyIndex) {
   });
 }
 
-async function igFetch(url, _proxyIndex = 0) {
-  // Try every cookie × proxy combo until one succeeds
-  const combos = [];
-  for (let c = 0; c < SESSION_COOKIES.length; c++)
-    for (let p = 0; p < PROXIES.length; p++)
-      combos.push([c, p]);
-
-  // Start from round-robin cookie to spread load
+// Try each cookie in turn; skip on challenge_required
+async function igFetch(url) {
   const start = cookieIndex % SESSION_COOKIES.length;
   cookieIndex++;
-  combos.sort((a) => (a[0] === start ? -1 : 1));
 
   let lastErr;
-  for (const [c, p] of combos) {
+  for (let i = 0; i < SESSION_COOKIES.length; i++) {
+    const idx = (start + i) % SESSION_COOKIES.length;
     try {
-      const data = await igFetchWith(url, c, p);
-      // challenge_required means this cookie is blocked — try next
-      if (data?.message === "challenge_required") {
-        lastErr = new Error("challenge_required");
+      const data = await igFetchWith(url, idx);
+      if (data?.message === "challenge_required" || data?.message === "login_required") {
+        lastErr = new Error(data.message);
         continue;
       }
       return data;
@@ -83,30 +62,7 @@ async function igFetch(url, _proxyIndex = 0) {
       lastErr = e;
     }
   }
-  throw lastErr || new Error("All cookies/proxies failed");
-}
-
-function proxyImage(url) {
-  return new Promise((resolve, reject) => {
-    const args = ["-s", "--max-time", "15", "-x", PROXIES[0],
-      "-H", "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 14_4 like Mac OS X)",
-      "-H", "Referer: https://www.instagram.com/",
-      url
-    ];
-    execFile("curl", args, { encoding: "buffer", maxBuffer: 20 * 1024 * 1024 }, (err, stdout) => {
-      if (err) return reject(new Error(`curl failed: ${err.message}`));
-      resolve(stdout);
-    });
-  });
-}
-
-async function fetchUserId(username) {
-  const data = await igFetch(
-    `https://i.instagram.com/api/v1/users/${encodeURIComponent(username)}/usernameinfo/`
-  );
-  const id = data?.user?.id || data?.user?.pk;
-  if (!id) throw new Error("User not found or private");
-  return id;
+  throw lastErr || new Error("All cookies failed");
 }
 
 const mediaTypeLabel = (t) =>
@@ -137,25 +93,10 @@ app.get("/", (_req, res) => {
     <li><code>GET /posts?username=</code> — Last 80 posts</li>
     <li><code>GET /reels?username=</code> — Reels</li>
     <li><code>GET /stories?username=</code> — Stories</li>
-    <li><code>GET /proxy?url=</code> — Image proxy</li>
   </ul>
   <footer>Educational use only.</footer>
 </body>
 </html>`);
-});
-
-// GET /proxy?url=
-app.get("/proxy", async (req, res) => {
-  const imageUrl = req.query.url;
-  if (!imageUrl) return res.status(400).json({ error: "Missing url parameter" });
-  try {
-    const data = await proxyImage(imageUrl);
-    res.setHeader("Content-Type", "image/jpeg");
-    res.setHeader("Cache-Control", "public, max-age=3600");
-    res.send(data);
-  } catch (e) {
-    res.status(500).json({ error: "Failed to fetch image", details: e.message });
-  }
 });
 
 // GET /info?username=
@@ -170,7 +111,6 @@ app.get("/info", async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
 
     const bioLinks = (user.bio_links ?? []).map((l) => l.url).filter(Boolean);
-
     res.json({
       id: user.id || user.pk,
       username: user.username,
@@ -198,7 +138,11 @@ app.get("/posts", async (req, res) => {
   const { username } = req.query;
   if (!username) return res.status(400).json({ error: "Username required" });
   try {
-    const userId = await fetchUserId(username);
+    const userInfo = await igFetch(
+      `https://i.instagram.com/api/v1/users/${encodeURIComponent(username)}/usernameinfo/`
+    );
+    const userId = userInfo?.user?.id || userInfo?.user?.pk;
+    if (!userId) throw new Error("User not found");
 
     const MAX_POSTS = 80;
     const allItems = [];
@@ -253,10 +197,13 @@ app.get("/reels", async (req, res) => {
   const { username } = req.query;
   if (!username) return res.status(400).json({ error: "Username required" });
   try {
-    const userId = await fetchUserId(username);
-    const data = await igFetch(
-      `https://i.instagram.com/api/v1/clips/user/${userId}/`
+    const userInfo = await igFetch(
+      `https://i.instagram.com/api/v1/users/${encodeURIComponent(username)}/usernameinfo/`
     );
+    const userId = userInfo?.user?.id || userInfo?.user?.pk;
+    if (!userId) throw new Error("User not found");
+
+    const data = await igFetch(`https://i.instagram.com/api/v1/clips/user/${userId}/`);
     if (!data.items?.length) return res.status(404).json({ error: "No reels found" });
 
     const reels = data.items.map((r) => ({
@@ -284,7 +231,12 @@ app.get("/stories", async (req, res) => {
   const { username } = req.query;
   if (!username) return res.status(400).json({ error: "Username required" });
   try {
-    const userId = await fetchUserId(username);
+    const userInfo = await igFetch(
+      `https://i.instagram.com/api/v1/users/${encodeURIComponent(username)}/usernameinfo/`
+    );
+    const userId = userInfo?.user?.id || userInfo?.user?.pk;
+    if (!userId) throw new Error("User not found");
+
     const data = await igFetch(
       `https://i.instagram.com/api/v1/feed/user/${userId}/reel_media/`
     );
