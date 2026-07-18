@@ -30,31 +30,24 @@ const PROXIES = [
 const IG_USER_AGENT =
   "Instagram 155.0.0.37.107 (iPhone11,8; iOS 14_4; en_US; en-US; scale=2.00; 828x1792; 190542906)";
 
-// ── Core fetch (tries both proxies) ──────────────────────────────────────────
-function igFetch(url, proxyIndex = 0) {
+// ── Core fetch (tries all cookie+proxy combos) ────────────────────────────────
+function igFetchWith(url, cookieIndex, proxyIndex) {
   return new Promise((resolve, reject) => {
     const proxy = PROXIES[proxyIndex];
+    const cookie = SESSION_COOKIES[cookieIndex];
     const args = ["-s", "--max-time", "20"];
     if (proxy) args.push("-x", proxy);
     args.push(
       "-H", `User-Agent: ${IG_USER_AGENT}`,
       "-H", "Accept-Language: en-US",
       "-H", "X-IG-App-ID: 936619743392459",
-      "-H", `Cookie: ${getNextCookie()}`,
+      "-H", `Cookie: ${cookie}`,
       url
     );
     execFile("curl", args, { maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) {
-        if (proxyIndex < PROXIES.length - 1)
-          return igFetch(url, proxyIndex + 1).then(resolve).catch(reject);
-        return reject(new Error(`curl failed: ${stderr || err.message}`));
-      }
+      if (err) return reject(new Error(`curl failed: ${stderr || err.message}`));
       const body = stdout.trim();
-      if (!body) {
-        if (proxyIndex < PROXIES.length - 1)
-          return igFetch(url, proxyIndex + 1).then(resolve).catch(reject);
-        return reject(new Error("Empty response from Instagram"));
-      }
+      if (!body) return reject(new Error("Empty response"));
       try {
         resolve(JSON.parse(body));
       } catch {
@@ -62,6 +55,35 @@ function igFetch(url, proxyIndex = 0) {
       }
     });
   });
+}
+
+async function igFetch(url, _proxyIndex = 0) {
+  // Try every cookie × proxy combo until one succeeds
+  const combos = [];
+  for (let c = 0; c < SESSION_COOKIES.length; c++)
+    for (let p = 0; p < PROXIES.length; p++)
+      combos.push([c, p]);
+
+  // Start from round-robin cookie to spread load
+  const start = cookieIndex % SESSION_COOKIES.length;
+  cookieIndex++;
+  combos.sort((a) => (a[0] === start ? -1 : 1));
+
+  let lastErr;
+  for (const [c, p] of combos) {
+    try {
+      const data = await igFetchWith(url, c, p);
+      // challenge_required means this cookie is blocked — try next
+      if (data?.message === "challenge_required") {
+        lastErr = new Error("challenge_required");
+        continue;
+      }
+      return data;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("All cookies/proxies failed");
 }
 
 function proxyImage(url) {
