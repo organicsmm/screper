@@ -13,33 +13,43 @@ const SESSION_COOKIES = [
   process.env.SESSION_COOKIE2 || "sessionid=43518657979%3AJaBxvaarCPqYBN%3A17%3AAYi2rJrcLIEkisqS5y_OpIKf-T0-YcRGt_mfeXcJ7A",
   process.env.SESSION_COOKIE3 || "sessionid=76670837707%3A531WL8IMR66MaY%3A0%3AAYgyI6DLZ3MjD4QwE1krewS5-IudlgT8vpYdYgoEQA",
 ];
-// Pick one working cookie per process instance (serverless = fresh each request)
-const SESSION_COOKIE = () => SESSION_COOKIES[Math.floor(Math.random() * SESSION_COOKIES.length)];
 const IG_USER_AGENT =
   "Instagram 155.0.0.37.107 (iPhone11,8; iOS 14_4; en_US; en-US; scale=2.00; 828x1792; 190542906)";
 
 // ── Core fetch via curl ───────────────────────────────────────────────────────
-function igFetch(url) {
+function igFetchWithCookie(url, cookie) {
   return new Promise((resolve, reject) => {
-    const args = ["-s"];
-    args.push(
+    const args = ["-s",
       "-H", `User-Agent: ${IG_USER_AGENT}`,
       "-H", "Accept-Language: en-US",
       "-H", "X-IG-App-ID: 936619743392459",
-      "-H", `Cookie: ${SESSION_COOKIE()}`,
+      "-H", `Cookie: ${cookie}`,
       url
-    );
+    ];
     execFile("curl", args, { maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) return reject(new Error(`curl failed: ${stderr || err.message}`));
       const body = stdout.trim();
       if (!body) return reject(new Error("Empty response from Instagram"));
-      try {
-        resolve(JSON.parse(body));
-      } catch {
-        reject(new Error(`Invalid JSON: ${body.slice(0, 200)}`));
-      }
+      try { resolve(JSON.parse(body)); }
+      catch { reject(new Error(`Invalid JSON: ${body.slice(0, 200)}`)); }
     });
   });
+}
+
+// Try each cookie in order; skip expired/challenged ones
+async function igFetch(url) {
+  let lastErr;
+  for (const cookie of SESSION_COOKIES) {
+    try {
+      const data = await igFetchWithCookie(url, cookie);
+      const msg = data?.message || "";
+      if (msg === "challenge_required" || msg === "login_required") {
+        lastErr = new Error(msg); continue;
+      }
+      return data;
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("All cookies failed");
 }
 
 function proxyImage(url) {
