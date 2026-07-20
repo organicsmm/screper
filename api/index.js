@@ -15,7 +15,6 @@ const SESSION_COOKIES = [
 ];
 let _cookieIdx = 0;
 const SESSION_COOKIE = () => { const c = SESSION_COOKIES[_cookieIdx % SESSION_COOKIES.length]; _cookieIdx++; return c; };
-const PROXY_URL      = process.env.PROXY_URL      || "http://5953:Xnv8AKXFBUUz@p105.instantproxies.com:9385";
 const IG_USER_AGENT =
   "Instagram 155.0.0.37.107 (iPhone11,8; iOS 14_4; en_US; en-US; scale=2.00; 828x1792; 190542906)";
 
@@ -23,7 +22,6 @@ const IG_USER_AGENT =
 function igFetch(url) {
   return new Promise((resolve, reject) => {
     const args = ["-s"];
-    if (PROXY_URL) args.push("-x", PROXY_URL);
     args.push(
       "-H", `User-Agent: ${IG_USER_AGENT}`,
       "-H", "Accept-Language: en-US",
@@ -47,7 +45,6 @@ function igFetch(url) {
 function proxyImage(url) {
   return new Promise((resolve, reject) => {
     const args = ["-s"];
-    if (PROXY_URL) args.push("-x", PROXY_URL);
     args.push(
       "-H", "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 14_4 like Mac OS X)",
       "-H", "Referer: https://www.instagram.com/",
