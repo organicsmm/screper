@@ -9,9 +9,9 @@ app.set("json spaces", 2);
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const SESSION_COOKIES = [
-  process.env.SESSION_COOKIE  || "sessionid=43518657979%3AJaBxvaarCPqYBN%3A17%3AAYi2rJrcLIEkisqS5y_OpIKf-T0-YcRGt_mfeXcJ7A",
-  process.env.SESSION_COOKIE2 || "sessionid=76670837707%3A531WL8IMR66MaY%3A0%3AAYgyI6DLZ3MjD4QwE1krewS5-IudlgT8vpYdYgoEQA",
-  process.env.SESSION_COOKIE3 || "sessionid=2294426582%3AL9R9IOcYmEHmqw%3A24%3AAYiOr6YRfQ2x7-Xwgd9U-jfwy59wXBG8sdJijt09GQ",
+  process.env.SESSION_COOKIE  || "sessionid=2294426582%3AL9R9IOcYmEHmqw%3A24%3AAYiOr6YRfQ2x7-Xwgd9U-jfwy59wXBG8sdJijt09GQ",
+  process.env.SESSION_COOKIE2 || "sessionid=43518657979%3AJaBxvaarCPqYBN%3A17%3AAYi2rJrcLIEkisqS5y_OpIKf-T0-YcRGt_mfeXcJ7A",
+  process.env.SESSION_COOKIE3 || "sessionid=76670837707%3A531WL8IMR66MaY%3A0%3AAYgyI6DLZ3MjD4QwE1krewS5-IudlgT8vpYdYgoEQA",
 ];
 let _cookieIdx = 0;
 const SESSION_COOKIE = () => { const c = SESSION_COOKIES[_cookieIdx % SESSION_COOKIES.length]; _cookieIdx++; return c; };
