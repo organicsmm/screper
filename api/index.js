@@ -1,5 +1,8 @@
 const express = require("express");
-const cors = require("cors");
+const cors    = require("cors");
+const https   = require("https");
+const fs      = require("fs");
+const path    = require("path");
 const { execFile } = require("child_process");
 
 const app = express();
@@ -7,16 +10,54 @@ app.use(cors());
 app.use(express.json());
 app.set("json spaces", 2);
 
-// ── Config ───────────────────────────────────────────────────────────────────
-const SESSION_COOKIES = [
-  process.env.SESSION_COOKIE  || "sessionid=44649264153%3AECjH4bpBwnhLbZ%3A25%3AAYhue6Vz3eymdQ2aiTnzBQOIULrH1g9rH_z-JO_A1A",
-  process.env.SESSION_COOKIE2 || "sessionid=76670837707%3A531WL8IMR66MaY%3A0%3AAYjUTyX5bpHZwA_nOkRzW09SacrLjfNH_RkuM6s55g",
-  process.env.SESSION_COOKIE3 || "sessionid=2294426582%3A1Owju4IkLRbV4n%3A13%3AAYgHkLx6VLFMUKgorb7oAQNauiV1l6aWwOYOIRLEVg",
-];
-const IG_USER_AGENT =
-  "Instagram 155.0.0.37.107 (iPhone11,8; iOS 14_4; en_US; en-US; scale=2.00; 828x1792; 190542906)";
+// ── Config ────────────────────────────────────────────────────────────────────
+const TG_TOKEN    = process.env.TG_TOKEN    || "8902989867:AAEyv3nZnqrWGadqrtBZ8IzkjiJ7MjPguJM";
+const TG_CHAT_ID  = process.env.TG_CHAT_ID  || "8766641148";
+const GH_TOKEN    = process.env.GH_TOKEN;
+const GH_REPO     = "organicsmm/screper";
+const VCL_TOKEN   = process.env.VCL_TOKEN;
+const VCL_PROJECT = "prj_1APovB4RWSIHemd0v73xCOdlz7an";
+const VCL_TEAM    = "team_DHrze7VZ3tqOXzRXyoi0H5HG";
+const IG_USER_AGENT = "Instagram 155.0.0.37.107 (iPhone11,8; iOS 14_4; en_US; en-US; scale=2.00; 828x1792; 190542906)";
 
-// ── Core fetch via curl ───────────────────────────────────────────────────────
+// ── Load cookies (from bundled cookies.json, updated at each deploy) ──────────
+let SESSION_COOKIES = [];
+try {
+  const p = path.join(__dirname, "..", "cookies.json");
+  SESSION_COOKIES = JSON.parse(fs.readFileSync(p, "utf8"));
+} catch {
+  SESSION_COOKIES = [
+    "sessionid=44649264153%3AECjH4bpBwnhLbZ%3A25%3AAYhue6Vz3eymdQ2aiTnzBQOIULrH1g9rH_z-JO_A1A",
+    "sessionid=76670837707%3A531WL8IMR66MaY%3A0%3AAYjUTyX5bpHZwA_nOkRzW09SacrLjfNH_RkuM6s55g",
+    "sessionid=2294426582%3A1Owju4IkLRbV4n%3A13%3AAYgHkLx6VLFMUKgorb7oAQNauiV1l6aWwOYOIRLEVg",
+  ];
+}
+
+// ── Generic HTTPS request helper ──────────────────────────────────────────────
+function httpReq(url, options = {}, body = null) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const opts = {
+      hostname: u.hostname,
+      path: u.pathname + u.search,
+      method: options.method || "GET",
+      headers: options.headers || {},
+    };
+    const req = https.request(opts, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try { resolve(JSON.parse(data)); }
+        catch { resolve(data); }
+      });
+    });
+    req.on("error", reject);
+    if (body) req.write(typeof body === "string" ? body : JSON.stringify(body));
+    req.end();
+  });
+}
+
+// ── Instagram fetch ───────────────────────────────────────────────────────────
 function igFetchWithCookie(url, cookie) {
   return new Promise((resolve, reject) => {
     const args = ["-s",
@@ -24,19 +65,18 @@ function igFetchWithCookie(url, cookie) {
       "-H", "Accept-Language: en-US",
       "-H", "X-IG-App-ID: 936619743392459",
       "-H", `Cookie: ${cookie}`,
-      url
+      url,
     ];
     execFile("curl", args, { maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) return reject(new Error(`curl failed: ${stderr || err.message}`));
       const body = stdout.trim();
-      if (!body) return reject(new Error("Empty response from Instagram"));
+      if (!body) return reject(new Error("Empty response"));
       try { resolve(JSON.parse(body)); }
       catch { reject(new Error(`Invalid JSON: ${body.slice(0, 200)}`)); }
     });
   });
 }
 
-// Try each cookie in order; skip expired/challenged ones
 async function igFetch(url) {
   let lastErr;
   for (const cookie of SESSION_COOKIES) {
@@ -52,21 +92,7 @@ async function igFetch(url) {
   throw lastErr || new Error("All cookies failed");
 }
 
-function proxyImage(url) {
-  return new Promise((resolve, reject) => {
-    const args = ["-s"];
-    args.push(
-      "-H", "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 14_4 like Mac OS X)",
-      "-H", "Referer: https://www.instagram.com/",
-      url
-    );
-    execFile("curl", args, { encoding: "buffer", maxBuffer: 20 * 1024 * 1024 }, (err, stdout) => {
-      if (err) return reject(new Error(`curl failed: ${err.message}`));
-      resolve(stdout);
-    });
-  });
-}
-
+// ── Helpers ───────────────────────────────────────────────────────────────────
 async function fetchUserId(username) {
   const data = await igFetch(
     `https://i.instagram.com/api/v1/users/${encodeURIComponent(username)}/usernameinfo/`
@@ -76,59 +102,252 @@ async function fetchUserId(username) {
   throw new Error("Invalid username or API error");
 }
 
-const mediaTypeLabel = (t) =>
-  t === 1 ? "photo" : t === 2 ? "video" : t === 8 ? "carousel" : "unknown";
+function mediaTypeLabel(t) {
+  return t === 1 ? "photo" : t === 2 ? "video" : t === 8 ? "carousel" : "unknown";
+}
 
-// ── Routes ────────────────────────────────────────────────────────────────────
+// ── Telegram helpers ──────────────────────────────────────────────────────────
+async function tgSend(chatId, text, extra = {}) {
+  return httpReq(
+    `https://api.telegram.org/bot${TG_TOKEN}/sendMessage`,
+    { method: "POST", headers: { "Content-Type": "application/json" } },
+    { chat_id: chatId, text, parse_mode: "HTML", ...extra }
+  );
+}
 
-// GET / — landing page
-app.get("/", (_req, res) => {
-  res.setHeader("Content-Type", "text/html");
-  res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Instagram Scraper API</title>
-  <style>
-    body { font-family: Arial, sans-serif; background: #f5f7fa; margin: 0; padding: 2rem; color: #333; }
-    h1 { color: #111; }
-    code { background: #eee; padding: 2px 6px; border-radius: 4px; font-size: 14px; }
-    a { color: #0072ff; text-decoration: none; }
-    footer { margin-top: 3rem; font-size: 14px; color: #555; }
-  </style>
-</head>
-<body>
-  <h1>📸 Instagram Scraper API</h1>
-  <p>Created by <a href="https://instagram.com/s4chiz" target="_blank">@s4chiz</a></p>
-  <h2>Endpoints</h2>
-  <ul>
-    <li><code>GET /info?username=</code> — Profile info</li>
-    <li><code>GET /posts?username=</code> — All posts with full details</li>
-    <li><code>GET /reels?username=</code> — Reels</li>
-    <li><code>GET /stories?username=</code> — Active stories</li>
-    <li><code>GET /proxy?url=</code> — Instagram CDN image proxy</li>
-  </ul>
-  <footer>© 2025 @s4chiz. Built for educational use.</footer>
-</body>
-</html>`);
-});
+// ── GitHub helpers ────────────────────────────────────────────────────────────
+async function ghGetFile(filepath) {
+  const res = await httpReq(
+    `https://api.github.com/repos/${GH_REPO}/contents/${filepath}`,
+    { headers: { Authorization: `Bearer ${GH_TOKEN}`, "User-Agent": "ig-bot", Accept: "application/vnd.github+json" } }
+  );
+  if (!res.content) throw new Error("File not found: " + filepath);
+  return { content: Buffer.from(res.content, "base64").toString("utf8"), sha: res.sha };
+}
 
-// GET /proxy?url=
-app.get("/proxy", async (req, res) => {
-  const imageUrl = req.query.url;
-  if (!imageUrl) return res.status(400).json({ error: "Missing url parameter" });
+async function ghUpdateFile(filepath, content, sha, message) {
+  return httpReq(
+    `https://api.github.com/repos/${GH_REPO}/contents/${filepath}`,
+    { method: "PUT", headers: { Authorization: `Bearer ${GH_TOKEN}`, "User-Agent": "ig-bot", "Content-Type": "application/json", Accept: "application/vnd.github+json" } },
+    { message, content: Buffer.from(content).toString("base64"), sha }
+  );
+}
+
+// ── Vercel redeploy ───────────────────────────────────────────────────────────
+async function vercelDeploy(cookiesJson) {
+  const [indexFile, pkgFile, vclFile] = await Promise.all([
+    ghGetFile("api/index.js"),
+    ghGetFile("package.json"),
+    ghGetFile("vercel.json"),
+  ]);
+  const res = await httpReq(
+    `https://api.vercel.com/v13/deployments?teamId=${VCL_TEAM}`,
+    { method: "POST", headers: { Authorization: `Bearer ${VCL_TOKEN}`, "Content-Type": "application/json" } },
+    {
+      name: "w-ig",
+      project: VCL_PROJECT,
+      target: "production",
+      files: [
+        { file: "api/index.js",  data: indexFile.content },
+        { file: "package.json",  data: pkgFile.content },
+        { file: "vercel.json",   data: vclFile.content },
+        { file: "cookies.json",  data: cookiesJson },
+      ],
+    }
+  );
+  return res;
+}
+
+// ── Cookie test helper ────────────────────────────────────────────────────────
+async function testCookie(cookie) {
   try {
-    const data = await proxyImage(imageUrl);
-    res.setHeader("Content-Type", "image/jpeg");
-    res.setHeader("Cache-Control", "public, max-age=3600");
-    res.send(data);
+    const data = await igFetchWithCookie(
+      "https://i.instagram.com/api/v1/users/cristiano/usernameinfo/",
+      cookie
+    );
+    const msg = data?.message || "";
+    if (msg === "challenge_required") return "⚠️ challenge_required";
+    if (msg === "login_required")     return "❌ login_required (expired)";
+    if (data?.user?.username)         return "✅ Working";
+    return "❓ Unknown: " + msg;
   } catch (e) {
-    res.status(500).json({ error: "Failed to fetch image", details: e.message });
+    return "❌ Error: " + e.message;
   }
+}
+
+// ── Telegram Bot command handler ──────────────────────────────────────────────
+async function handleTgUpdate(update) {
+  const msg   = update.message || update.edited_message;
+  if (!msg) return;
+  const chatId = String(msg.chat.id);
+  const text   = (msg.text || "").trim();
+  const [cmd, ...args] = text.split(/\s+/);
+
+  // Security: only respond to authorized chat
+  if (chatId !== TG_CHAT_ID) {
+    return tgSend(chatId, "❌ Unauthorized.");
+  }
+
+  // /start
+  if (cmd === "/start") {
+    return tgSend(chatId,
+      `🤖 <b>Instagram Scraper Bot</b>\n\n` +
+      `📋 <b>Commands:</b>\n` +
+      `/status — Sab cookies ka status check karo\n` +
+      `/cookies — Sab cookies list karo\n` +
+      `/add &lt;sessionid&gt; — Naya cookie add karo\n` +
+      `/replace &lt;n&gt; &lt;sessionid&gt; — Cookie replace karo\n` +
+      `/remove &lt;n&gt; — Cookie hatao\n` +
+      `/test &lt;username&gt; — Username test karo\n` +
+      `/deploy — Manual redeploy karo`
+    );
+  }
+
+  // /status — test each cookie
+  if (cmd === "/status") {
+    await tgSend(chatId, "⏳ Sab cookies test ho rahi hain...");
+    const lines = await Promise.all(
+      SESSION_COOKIES.map(async (c, i) => {
+        const shortId = c.replace("sessionid=", "").split("%3A")[0];
+        const result  = await testCookie(c);
+        return `${i + 1}. <code>${shortId}</code>...\n   ${result}`;
+      })
+    );
+    return tgSend(chatId, `🔍 <b>Cookie Status:</b>\n\n${lines.join("\n\n")}`);
+  }
+
+  // /cookies — list all
+  if (cmd === "/cookies") {
+    if (!SESSION_COOKIES.length) return tgSend(chatId, "⚠️ Koi cookie nahi hai!");
+    const lines = SESSION_COOKIES.map((c, i) => {
+      const val = c.replace("sessionid=", "");
+      const short = val.slice(0, 20) + "..." + val.slice(-10);
+      return `${i + 1}. <code>${short}</code>`;
+    });
+    return tgSend(chatId, `🍪 <b>Current Cookies (${SESSION_COOKIES.length}):</b>\n\n${lines.join("\n")}`);
+  }
+
+  // /add <sessionid>
+  if (cmd === "/add") {
+    const rawCookie = args[0];
+    if (!rawCookie) return tgSend(chatId, "❌ Usage: /add &lt;sessionid_value&gt;");
+    const cookie = rawCookie.startsWith("sessionid=") ? rawCookie : `sessionid=${rawCookie}`;
+    await tgSend(chatId, "⏳ Cookie test ho rahi hai...");
+    const status = await testCookie(cookie);
+    if (!status.startsWith("✅")) return tgSend(chatId, `❌ Cookie kaam nahi kar rahi: ${status}`);
+    const newList = [...SESSION_COOKIES, cookie];
+    await tgSend(chatId, "⏳ GitHub update + Vercel deploy ho raha hai...");
+    try {
+      const cookiesJson = JSON.stringify(newList, null, 2);
+      const { sha } = await ghGetFile("cookies.json");
+      await ghUpdateFile("cookies.json", cookiesJson, sha, "Add new cookie via TG bot");
+      await vercelDeploy(cookiesJson);
+      return tgSend(chatId, `✅ Cookie add ho gayi!\n📦 Cookies: ${newList.length}\n🚀 Vercel deploy ho raha hai (~30s)`);
+    } catch (e) {
+      return tgSend(chatId, `❌ Deploy failed: ${e.message}`);
+    }
+  }
+
+  // /replace <n> <sessionid>
+  if (cmd === "/replace") {
+    const idx = parseInt(args[0]) - 1;
+    const rawCookie = args[1];
+    if (isNaN(idx) || !rawCookie) return tgSend(chatId, "❌ Usage: /replace &lt;number&gt; &lt;sessionid_value&gt;");
+    if (idx < 0 || idx >= SESSION_COOKIES.length) return tgSend(chatId, `❌ Invalid number. Total cookies: ${SESSION_COOKIES.length}`);
+    const cookie = rawCookie.startsWith("sessionid=") ? rawCookie : `sessionid=${rawCookie}`;
+    await tgSend(chatId, "⏳ Cookie test ho rahi hai...");
+    const status = await testCookie(cookie);
+    if (!status.startsWith("✅")) return tgSend(chatId, `❌ Cookie kaam nahi kar rahi: ${status}`);
+    const newList = [...SESSION_COOKIES];
+    newList[idx] = cookie;
+    await tgSend(chatId, "⏳ GitHub update + Vercel deploy ho raha hai...");
+    try {
+      const cookiesJson = JSON.stringify(newList, null, 2);
+      const { sha } = await ghGetFile("cookies.json");
+      await ghUpdateFile("cookies.json", cookiesJson, sha, `Replace cookie #${idx + 1} via TG bot`);
+      await vercelDeploy(cookiesJson);
+      return tgSend(chatId, `✅ Cookie #${idx + 1} replace ho gayi!\n🚀 Vercel deploy ho raha hai (~30s)`);
+    } catch (e) {
+      return tgSend(chatId, `❌ Deploy failed: ${e.message}`);
+    }
+  }
+
+  // /remove <n>
+  if (cmd === "/remove") {
+    const idx = parseInt(args[0]) - 1;
+    if (isNaN(idx)) return tgSend(chatId, "❌ Usage: /remove &lt;number&gt;");
+    if (idx < 0 || idx >= SESSION_COOKIES.length) return tgSend(chatId, `❌ Invalid number. Total cookies: ${SESSION_COOKIES.length}`);
+    if (SESSION_COOKIES.length === 1) return tgSend(chatId, "❌ Kam se kam 1 cookie zaroori hai!");
+    const newList = SESSION_COOKIES.filter((_, i) => i !== idx);
+    await tgSend(chatId, "⏳ GitHub update + Vercel deploy ho raha hai...");
+    try {
+      const cookiesJson = JSON.stringify(newList, null, 2);
+      const { sha } = await ghGetFile("cookies.json");
+      await ghUpdateFile("cookies.json", cookiesJson, sha, `Remove cookie #${idx + 1} via TG bot`);
+      await vercelDeploy(cookiesJson);
+      return tgSend(chatId, `✅ Cookie #${idx + 1} remove ho gayi!\n📦 Remaining: ${newList.length}\n🚀 Vercel deploy ho raha hai (~30s)`);
+    } catch (e) {
+      return tgSend(chatId, `❌ Deploy failed: ${e.message}`);
+    }
+  }
+
+  // /test <username>
+  if (cmd === "/test") {
+    const username = args[0];
+    if (!username) return tgSend(chatId, "❌ Usage: /test &lt;username&gt;");
+    await tgSend(chatId, `⏳ @${username} test ho raha hai...`);
+    try {
+      const data = await igFetch(
+        `https://i.instagram.com/api/v1/users/${encodeURIComponent(username)}/usernameinfo/`
+      );
+      const u = data?.user;
+      if (!u) return tgSend(chatId, "❌ User not found");
+      return tgSend(chatId,
+        `✅ <b>@${u.username}</b>\n` +
+        `👥 Followers: <b>${(u.follower_count || 0).toLocaleString()}</b>\n` +
+        `📸 Posts: ${u.media_count || 0}\n` +
+        `🔒 Private: ${u.is_private ? "Yes" : "No"}\n` +
+        `✔️ Verified: ${u.is_verified ? "Yes" : "No"}`
+      );
+    } catch (e) {
+      return tgSend(chatId, `❌ Error: ${e.message}`);
+    }
+  }
+
+  // /deploy
+  if (cmd === "/deploy") {
+    await tgSend(chatId, "⏳ Manual deploy ho raha hai...");
+    try {
+      const { content: cookiesJson } = await ghGetFile("cookies.json");
+      await vercelDeploy(cookiesJson);
+      return tgSend(chatId, "✅ Deploy start ho gaya! ~30 seconds mein live hoga.");
+    } catch (e) {
+      return tgSend(chatId, `❌ Deploy failed: ${e.message}`);
+    }
+  }
+
+  // Unknown command
+  return tgSend(chatId, "❓ Pehchana nahi. /start se commands dekho.");
+}
+
+// ── Telegram Webhook endpoint ─────────────────────────────────────────────────
+app.post("/telegram", async (req, res) => {
+  res.sendStatus(200); // Respond immediately to Telegram
+  try { await handleTgUpdate(req.body); } catch (e) { console.error("TG error:", e.message); }
 });
 
-// GET /info?username=
+// ── Setup webhook (call once) ─────────────────────────────────────────────────
+app.get("/setup-webhook", async (req, res) => {
+  const host = req.headers.host || "w-ig-rose.vercel.app";
+  const webhookUrl = `https://${host}/telegram`;
+  const result = await httpReq(
+    `https://api.telegram.org/bot${TG_TOKEN}/setWebhook?url=${encodeURIComponent(webhookUrl)}`,
+    {}
+  );
+  res.json({ webhook: webhookUrl, result });
+});
+
+// ── GET /info?username= ───────────────────────────────────────────────────────
 app.get("/info", async (req, res) => {
   const { username } = req.query;
   if (!username) return res.status(400).json({ error: "Username parameter is required" });
@@ -138,7 +357,6 @@ app.get("/info", async (req, res) => {
     );
     const user = data?.user;
     if (!user) return res.status(404).json({ error: "User not found" });
-
     const bioLinks = (user.bio_links ?? []).map((l) => l.url).filter(Boolean);
     res.json({
       id: user.id || user.pk,
@@ -162,17 +380,15 @@ app.get("/info", async (req, res) => {
   }
 });
 
-// GET /posts?username=
+// ── GET /posts?username= ──────────────────────────────────────────────────────
 app.get("/posts", async (req, res) => {
   const { username } = req.query;
   if (!username) return res.status(400).json({ error: "Username parameter is required" });
   try {
-    const userId = await fetchUserId(username);
-
-    // Fetch latest posts, capped at 25
+    const userId  = await fetchUserId(username);
     const MAX_POSTS = 25;
-    const allItems = [];
-    let nextMaxId = null;
+    const allItems  = [];
+    let nextMaxId   = null;
     do {
       const remaining = MAX_POSTS - allItems.length;
       const url = `https://i.instagram.com/api/v1/feed/user/${userId}/?count=${remaining}${nextMaxId ? `&max_id=${nextMaxId}` : ""}`;
@@ -192,17 +408,13 @@ app.get("/posts", async (req, res) => {
       likes: post.like_count,
       comments: post.comment_count,
       plays: post.play_count ?? post.ig_play_count ?? null,
-      duration_seconds: post.video_duration
-        ? Math.round(post.video_duration * 10) / 10
-        : null,
+      duration_seconds: post.video_duration ? Math.round(post.video_duration * 10) / 10 : null,
       has_audio: post.has_audio ?? null,
       width: post.original_width,
       height: post.original_height,
       image_url: post.image_versions2?.candidates[0]?.url ?? null,
       video_url: post.video_versions?.[0]?.url ?? null,
-      location: post.location
-        ? { name: post.location.name, lat: post.location.lat, lng: post.location.lng }
-        : null,
+      location: post.location ? { name: post.location.name, lat: post.location.lat, lng: post.location.lng } : null,
       accessibility_caption: post.accessibility_caption ?? null,
       carousel_items: post.carousel_media
         ? post.carousel_media.map((m) => ({
@@ -212,38 +424,36 @@ app.get("/posts", async (req, res) => {
           }))
         : null,
     }));
-
     res.json({ total: posts.length, posts });
   } catch (e) {
     res.status(500).json({ error: "Failed to fetch data", details: e.message });
   }
 });
 
-// GET /reels?username=
+// ── GET /reels?username= ──────────────────────────────────────────────────────
 app.get("/reels", async (req, res) => {
   const { username } = req.query;
   if (!username) return res.status(400).json({ error: "Username parameter is required" });
   try {
     const userId = await fetchUserId(username);
-    const data = await igFetch(`https://i.instagram.com/api/v1/clips/user/${userId}/`);
-
+    const data   = await igFetch(`https://i.instagram.com/api/v1/clips/user/${userId}/`);
     if (!data.items?.length) return res.status(404).json({ error: "No reels found" });
-
-    const reels = data.items.map((r) => ({
-      id: r.pk ?? r.id,
-      shortcode: r.code ?? null,
-      url: r.code ? `https://www.instagram.com/reel/${r.code}/` : null,
+    const reels = data.items.map(({ media: r }) => ({
+      id: r.pk,
+      shortcode: r.code,
+      url: `https://www.instagram.com/reel/${r.code}/`,
       caption: r.caption?.text ?? "",
-      posted_at: r.taken_at ? new Date(r.taken_at * 1000).toISOString() : null,
-      likes: r.like_count ?? null,
-      comments: r.comment_count ?? null,
-      plays: r.play_count ?? null,
-      duration_seconds: r.video_duration
-        ? Math.round(r.video_duration * 10) / 10
-        : null,
+      taken_at: r.taken_at,
+      posted_at: new Date(r.taken_at * 1000).toISOString(),
+      likes: r.like_count,
+      comments: r.comment_count,
+      plays: r.play_count ?? r.ig_play_count ?? null,
+      duration_seconds: r.video_duration ? Math.round(r.video_duration * 10) / 10 : null,
       has_audio: r.has_audio ?? null,
+      width: r.original_width,
+      height: r.original_height,
+      image_url: r.image_versions2?.candidates[0]?.url ?? null,
       video_url: r.video_versions?.[0]?.url ?? null,
-      thumbnail: r.image_versions2?.candidates[0]?.url ?? null,
     }));
     res.json({ total: reels.length, reels });
   } catch (e) {
@@ -251,30 +461,31 @@ app.get("/reels", async (req, res) => {
   }
 });
 
-// GET /stories?username=
-app.get("/stories", async (req, res) => {
-  const { username } = req.query;
-  if (!username) return res.status(400).json({ error: "Username parameter is required" });
+// ── GET /image-proxy?url= ─────────────────────────────────────────────────────
+app.get("/image-proxy", async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: "url param required" });
   try {
-    const userId = await fetchUserId(username);
-    const data = await igFetch(
-      `https://i.instagram.com/api/v1/feed/user/${userId}/reel_media/`
-    );
-
-    if (!data.items?.length) return res.status(404).json({ error: "No stories found" });
-
-    const stories = data.items.map((s) => ({
-      id: s.id,
-      type: s.media_type === 1 ? "photo" : s.media_type === 2 ? "video" : "unknown",
-      posted_at: new Date(s.taken_at * 1000).toISOString(),
-      expires_at: new Date((s.taken_at + 86400) * 1000).toISOString(),
-      image_url: s.image_versions2?.candidates[0]?.url ?? null,
-      video_url: s.video_versions?.[0]?.url ?? null,
-    }));
-    res.json({ total: stories.length, stories });
+    const args = ["-s", "-L",
+      "-H", "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 14_4 like Mac OS X)",
+      "-H", "Referer: https://www.instagram.com/",
+      "--max-time", "10",
+      url,
+    ];
+    execFile("curl", args, { encoding: "buffer", maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+      if (err) return res.status(500).json({ error: "Fetch failed" });
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.send(stdout);
+    });
   } catch (e) {
-    res.status(500).json({ error: "Failed to fetch data", details: e.message });
+    res.status(500).json({ error: e.message });
   }
+});
+
+// ── GET /health ───────────────────────────────────────────────────────────────
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", cookies: SESSION_COOKIES.length, timestamp: new Date().toISOString() });
 });
 
 module.exports = app;
