@@ -10,6 +10,7 @@ app.set("json spaces", 2);
 // ── Config ───────────────────────────────────────────────────────────────────
 const SESSION_COOKIES = [
   process.env.SESSION_COOKIE  || "sessionid=44649264153%3AECjH4bpBwnhLbZ%3A25%3AAYhue6Vz3eymdQ2aiTnzBQOIULrH1g9rH_z-JO_A1A",
+  process.env.SESSION_COOKIE2 || "sessionid=76670837707%3A531WL8IMR66MaY%3A0%3AAYjUTyX5bpHZwA_nOkRzW09SacrLjfNH_RkuM6s55g",
 ];
 const IG_USER_AGENT =
   "Instagram 155.0.0.37.107 (iPhone11,8; iOS 14_4; en_US; en-US; scale=2.00; 828x1792; 190542906)";
