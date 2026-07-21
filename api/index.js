@@ -37,11 +37,17 @@ try {
 function httpReq(url, options = {}, body = null) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
+    const bodyStr = body ? (typeof body === "string" ? body : JSON.stringify(body)) : null;
+    const headers = { ...(options.headers || {}) };
+    if (bodyStr) {
+      headers["Content-Length"] = Buffer.byteLength(bodyStr);
+      if (!headers["Content-Type"]) headers["Content-Type"] = "application/json";
+    }
     const opts = {
       hostname: u.hostname,
       path: u.pathname + u.search,
       method: options.method || "GET",
-      headers: options.headers || {},
+      headers,
     };
     const req = https.request(opts, (res) => {
       let data = "";
@@ -52,7 +58,7 @@ function httpReq(url, options = {}, body = null) {
       });
     });
     req.on("error", reject);
-    if (body) req.write(typeof body === "string" ? body : JSON.stringify(body));
+    if (bodyStr) req.write(bodyStr);
     req.end();
   });
 }
