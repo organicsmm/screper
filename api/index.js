@@ -9,9 +9,7 @@ app.set("json spaces", 2);
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const SESSION_COOKIES = [
-  process.env.SESSION_COOKIE  || "sessionid=2294426582%3AL9R9IOcYmEHmqw%3A24%3AAYiOr6YRfQ2x7-Xwgd9U-jfwy59wXBG8sdJijt09GQ",
-  process.env.SESSION_COOKIE2 || "sessionid=43518657979%3AJaBxvaarCPqYBN%3A17%3AAYi2rJrcLIEkisqS5y_OpIKf-T0-YcRGt_mfeXcJ7A",
-  process.env.SESSION_COOKIE3 || "sessionid=76670837707%3A531WL8IMR66MaY%3A0%3AAYgyI6DLZ3MjD4QwE1krewS5-IudlgT8vpYdYgoEQA",
+  process.env.SESSION_COOKIE  || "sessionid=44649264153%3AECjH4bpBwnhLbZ%3A25%3AAYhue6Vz3eymdQ2aiTnzBQOIULrH1g9rH_z-JO_A1A",
 ];
 const IG_USER_AGENT =
   "Instagram 155.0.0.37.107 (iPhone11,8; iOS 14_4; en_US; en-US; scale=2.00; 828x1792; 190542906)";
