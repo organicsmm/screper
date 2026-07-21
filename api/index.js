@@ -332,8 +332,8 @@ async function handleTgUpdate(update) {
 
 // ── Telegram Webhook endpoint ─────────────────────────────────────────────────
 app.post("/telegram", async (req, res) => {
-  res.sendStatus(200); // Respond immediately to Telegram
   try { await handleTgUpdate(req.body); } catch (e) { console.error("TG error:", e.message); }
+  res.sendStatus(200); // Respond after processing
 });
 
 // ── Setup webhook (call once) ─────────────────────────────────────────────────
