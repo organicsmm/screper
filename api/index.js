@@ -520,6 +520,8 @@ app.get("/posts", async (req, res) => {
 app.get("/reels", async (req, res) => {
   const { username } = req.query;
   if (!username) return res.status(400).json({ error: "Username parameter is required" });
+
+  // Try primary (cookies)
   try {
     const userId = await fetchUserId(username);
     const data   = await igFetch(`https://i.instagram.com/api/v1/clips/user/${userId}/`);
@@ -540,10 +542,36 @@ app.get("/reels", async (req, res) => {
       height: r.original_height,
       image_url: r.image_versions2?.candidates[0]?.url ?? null,
       video_url: r.video_versions?.[0]?.url ?? null,
+      source: "primary",
     }));
-    res.json({ total: reels.length, reels });
+    return res.json({ total: reels.length, reels, source: "primary" });
+  } catch (_) {}
+
+  // Fallback — use is_video posts from fallback API
+  try {
+    const r = await fallbackFetch(username);
+    const videos = (r.posts ?? []).filter(p => p.is_video);
+    if (!videos.length) return res.status(404).json({ error: "No reels found", source: "fallback" });
+    const reels = videos.map((p) => ({
+      id: null,
+      shortcode: null,
+      url: null,
+      caption: "",
+      taken_at: null,
+      posted_at: null,
+      likes: p.likes ?? 0,
+      comments: p.comments ?? 0,
+      plays: null,
+      duration_seconds: null,
+      has_audio: null,
+      width: null,
+      height: null,
+      image_url: p.thumbnail ? `https://w-ig-rose.vercel.app/image-proxy?url=${encodeURIComponent(p.thumbnail)}` : null,
+      video_url: null,
+    }));
+    return res.json({ total: reels.length, reels, source: "fallback" });
   } catch (e) {
-    res.status(500).json({ error: "Failed to fetch data", details: e.message });
+    return res.status(500).json({ error: "All sources failed", details: e.message });
   }
 });
 
