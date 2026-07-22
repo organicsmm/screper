@@ -16,9 +16,10 @@ const TG_CHAT_ID  = process.env.TG_CHAT_ID  || "8766641148";
 const GH_TOKEN    = process.env.GH_TOKEN;
 const GH_REPO     = "organicsmm/screper";
 const VCL_TOKEN   = process.env.VCL_TOKEN;
-const VCL_PROJECT = "prj_1APovB4RWSIHemd0v73xCOdlz7an";
-const VCL_TEAM    = "team_DHrze7VZ3tqOXzRXyoi0H5HG";
+const VCL_PROJECT   = "prj_1APovB4RWSIHemd0v73xCOdlz7an";
+const VCL_TEAM      = "team_DHrze7VZ3tqOXzRXyoi0H5HG";
 const IG_USER_AGENT = "Instagram 155.0.0.37.107 (iPhone11,8; iOS 14_4; en_US; en-US; scale=2.00; 828x1792; 190542906)";
+const FALLBACK_API  = "https://instaprofile-production.up.railway.app/api/profile";
 
 // ── Load cookies (from bundled cookies.json, updated at each deploy) ──────────
 let SESSION_COOKIES = [];
@@ -96,6 +97,15 @@ async function igFetch(url) {
     } catch (e) { lastErr = e; }
   }
   throw lastErr || new Error("All cookies failed");
+}
+
+// ── Fallback API (used when all cookies are dead) ─────────────────────────────
+async function fallbackFetch(username) {
+  const data = await httpReq(`${FALLBACK_API}?username=${encodeURIComponent(username)}`);
+  // Response is in data.response even if data.error exists
+  const r = data?.response;
+  if (!r || typeof r.followers === "undefined") throw new Error("Fallback: profile not found");
+  return r;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -357,6 +367,8 @@ app.get("/setup-webhook", async (req, res) => {
 app.get("/info", async (req, res) => {
   const { username } = req.query;
   if (!username) return res.status(400).json({ error: "Username parameter is required" });
+
+  // Try primary (cookies)
   try {
     const data = await igFetch(
       `https://i.instagram.com/api/v1/users/${encodeURIComponent(username)}/usernameinfo/`
@@ -364,7 +376,7 @@ app.get("/info", async (req, res) => {
     const user = data?.user;
     if (!user) return res.status(404).json({ error: "User not found" });
     const bioLinks = (user.bio_links ?? []).map((l) => l.url).filter(Boolean);
-    res.json({
+    return res.json({
       id: user.id || user.pk,
       username: user.username,
       full_name: user.full_name,
@@ -379,10 +391,34 @@ app.get("/info", async (req, res) => {
       is_private: user.is_private,
       is_verified: user.is_verified,
       is_business: user.is_business,
-      profile_url: `https://www.instagram.com/${user.username}/`,
+      profile_url: `https://www.instagram.com/${username}/`,
+      source: "primary",
+    });
+  } catch (_) {}
+
+  // Fallback API
+  try {
+    const r = await fallbackFetch(username);
+    return res.json({
+      id: null,
+      username: username,
+      full_name: r.full_name || null,
+      bio: r.biography || null,
+      category: r.category || null,
+      website: null,
+      bio_links: [],
+      followers: r.followers ?? 0,
+      following: r.following ?? 0,
+      posts: r.post_count ?? 0,
+      profile_picture: null,
+      is_private: r.is_private ?? false,
+      is_verified: r.is_verified ?? false,
+      is_business: false,
+      profile_url: `https://www.instagram.com/${username}/`,
+      source: "fallback",
     });
   } catch (e) {
-    res.status(500).json({ error: "Failed to fetch data", details: e.message });
+    return res.status(500).json({ error: "All sources failed", details: e.message });
   }
 });
 
@@ -390,6 +426,8 @@ app.get("/info", async (req, res) => {
 app.get("/posts", async (req, res) => {
   const { username } = req.query;
   if (!username) return res.status(400).json({ error: "Username parameter is required" });
+
+  // Try primary (cookies)
   try {
     const userId  = await fetchUserId(username);
     const MAX_POSTS = 25;
@@ -430,9 +468,36 @@ app.get("/posts", async (req, res) => {
           }))
         : null,
     }));
-    res.json({ total: posts.length, posts });
+    return res.json({ total: posts.length, posts, source: "primary" });
+  } catch (_) {}
+
+  // Fallback API — returns limited post data
+  try {
+    const r = await fallbackFetch(username);
+    const posts = (r.posts ?? []).map((p, i) => ({
+      id: null,
+      shortcode: null,
+      url: null,
+      type: p.is_video ? "video" : "photo",
+      caption: "",
+      taken_at: null,
+      posted_at: null,
+      likes: p.likes ?? 0,
+      comments: p.comments ?? 0,
+      plays: null,
+      duration_seconds: null,
+      has_audio: null,
+      width: null,
+      height: null,
+      image_url: p.thumbnail ?? null,
+      video_url: null,
+      location: null,
+      accessibility_caption: null,
+      carousel_items: null,
+    }));
+    return res.json({ total: posts.length, posts, source: "fallback" });
   } catch (e) {
-    res.status(500).json({ error: "Failed to fetch data", details: e.message });
+    return res.status(500).json({ error: "All sources failed", details: e.message });
   }
 });
 
