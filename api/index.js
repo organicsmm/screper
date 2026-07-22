@@ -490,9 +490,9 @@ app.get("/posts", async (req, res) => {
   try {
     const r = await fallbackFetch(username);
     const posts = (r.posts ?? []).map((p, i) => ({
-      id: null,
-      shortcode: null,
-      url: null,
+      id: `fallback_${username}_${i}`,
+      shortcode: `fallback_${i}`,
+      url: `https://www.instagram.com/${username}/`,
       type: p.is_video ? "video" : "photo",
       caption: "",
       taken_at: null,
@@ -552,10 +552,10 @@ app.get("/reels", async (req, res) => {
     const r = await fallbackFetch(username);
     const videos = (r.posts ?? []).filter(p => p.is_video);
     if (!videos.length) return res.status(404).json({ error: "No reels found", source: "fallback" });
-    const reels = videos.map((p) => ({
-      id: null,
-      shortcode: null,
-      url: null,
+    const reels = videos.map((p, i) => ({
+      id: `fallback_reel_${username}_${i}`,
+      shortcode: `fallback_reel_${i}`,
+      url: `https://www.instagram.com/${username}/`,
       caption: "",
       taken_at: null,
       posted_at: null,
