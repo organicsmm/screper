@@ -312,6 +312,8 @@ async function handleTgUpdate(update) {
     const username = args[0];
     if (!username) return tgSend(chatId, "❌ Usage: /test &lt;username&gt;");
     await tgSend(chatId, `⏳ @${username} test ho raha hai...`);
+
+    // Try primary (cookies)
     try {
       const data = await igFetch(
         `https://i.instagram.com/api/v1/users/${encodeURIComponent(username)}/usernameinfo/`
@@ -319,14 +321,27 @@ async function handleTgUpdate(update) {
       const u = data?.user;
       if (!u) return tgSend(chatId, "❌ User not found");
       return tgSend(chatId,
-        `✅ <b>@${u.username}</b>\n` +
+        `✅ <b>@${u.username}</b> <i>(primary)</i>\n` +
         `👥 Followers: <b>${(u.follower_count || 0).toLocaleString()}</b>\n` +
         `📸 Posts: ${u.media_count || 0}\n` +
         `🔒 Private: ${u.is_private ? "Yes" : "No"}\n` +
         `✔️ Verified: ${u.is_verified ? "Yes" : "No"}`
       );
+    } catch (_) {}
+
+    // Fallback
+    try {
+      const r = await fallbackFetch(username);
+      return tgSend(chatId,
+        `✅ <b>@${username}</b> <i>(fallback - cookies dead)</i>\n` +
+        `👥 Followers: <b>${(r.followers || 0).toLocaleString()}</b>\n` +
+        `📸 Posts: ${r.post_count || 0}\n` +
+        `🔒 Private: ${r.is_private ? "Yes" : "No"}\n` +
+        `✔️ Verified: ${r.is_verified ? "Yes" : "No"}\n` +
+        `⚠️ Cookies expired hain — naya /add karo`
+      );
     } catch (e) {
-      return tgSend(chatId, `❌ Error: ${e.message}`);
+      return tgSend(chatId, `❌ Dono fail: ${e.message}`);
     }
   }
 
