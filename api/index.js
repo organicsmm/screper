@@ -504,7 +504,9 @@ app.get("/posts", async (req, res) => {
       has_audio: null,
       width: null,
       height: null,
-      image_url: p.thumbnail ? `https://w-ig-rose.vercel.app/image-proxy?url=${encodeURIComponent(p.thumbnail)}` : null,
+      image_url: p.thumbnail || null,
+      thumbnail_url: p.thumbnail || null,
+      display_url: p.thumbnail || null,
       video_url: null,
       location: null,
       accessibility_caption: null,
@@ -566,7 +568,9 @@ app.get("/reels", async (req, res) => {
       has_audio: null,
       width: null,
       height: null,
-      image_url: p.thumbnail ? `https://w-ig-rose.vercel.app/image-proxy?url=${encodeURIComponent(p.thumbnail)}` : null,
+      image_url: p.thumbnail || null,
+      thumbnail_url: p.thumbnail || null,
+      display_url: p.thumbnail || null,
       video_url: null,
     }));
     return res.json({ total: reels.length, reels, source: "fallback" });
